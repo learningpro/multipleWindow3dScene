@@ -6,7 +6,10 @@ const t = THREE;
 let camera, scene, renderer, world;
 let near, far;
 let pixR = window.devicePixelRatio ? window.devicePixelRatio : 1;
-let cubes = [];
+// let spheres = [];
+let spheres = [];
+let markers = [];
+let lines = [];
 let sceneOffsetTarget = {x: 0, y: 0};
 let sceneOffset = {x: 0, y: 0};
 
@@ -33,9 +36,9 @@ if (new URLSearchParams(window.location.search).get("clear"))
 	localStorage.clear();
 }
 else
-{	
+{
 	// this code is essential to circumvent that some browsers preload the content of some pages before you actually hit the url
-	document.addEventListener("visibilitychange", () => 
+	document.addEventListener("visibilitychange", () =>
 	{
 		if (document.visibilityState != 'hidden' && !initialized)
 		{
@@ -54,7 +57,7 @@ else
 	{
 		initialized = true;
 
-		// add a short timeout because window.offsetX reports wrong values before a short period 
+		// add a short timeout because window.offsetX reports wrong values before a short period
 		setTimeout(() => {
 			setupScene();
 			setupWindowManager();
@@ -62,13 +65,13 @@ else
 			updateWindowShape(false);
 			render();
 			window.addEventListener('resize', resize);
-		}, 500)	
+		}, 500)
 	}
 
 	function setupScene ()
 	{
 		camera = new t.OrthographicCamera(0, 0, window.innerWidth, window.innerHeight, -10000, 10000);
-		
+
 		camera.position.z = 2.5;
 		near = camera.position.z - .5;
 		far = camera.position.z + 0.5;
@@ -79,7 +82,7 @@ else
 
 		renderer = new t.WebGLRenderer({antialias: true, depthBuffer: true});
 		renderer.setPixelRatio(pixR);
-	    
+
 	  	world = new t.Object3D();
 		scene.add(world);
 
@@ -105,21 +108,88 @@ else
 
 	function windowsUpdated ()
 	{
-		updateNumberOfCubes();
+		updateNumberOfSpheres();
+	}
+	function updateNumberOfSpheres() {
+		let wins = windowManager.getWindows();
+
+		// remove all spheres and markers
+		spheres.forEach((s) => {
+			world.remove(s);
+		});
+		markers.forEach((m) => {
+			world.remove(m);
+		});
+		lines.forEach((l) => {
+			world.remove(l);
+		});
+
+		// add new spheres and markers based on the current window setup
+		for (let i = 0; i < wins.length; i++) {
+			let win = wins[i];
+
+			let c = new t.Color();
+			c.setHSL(i * 0.1, 1.0, 0.5);
+
+			let radius = 50 + i * 25;
+			let sphere = new t.Mesh(
+				new t.SphereGeometry(radius, 32, 32),
+				new t.MeshBasicMaterial({ color: c, wireframe: true })
+			);
+			sphere.position.x = win.shape.x + win.shape.w * 0.5;
+			sphere.position.y = win.shape.y + win.shape.h * 0.5;
+
+			let marker = new t.Mesh(
+				new t.SphereGeometry(5, 16, 16),
+				new t.MeshBasicMaterial({ color: c })
+			);
+			marker.position.copy(sphere.position);
+
+			world.add(sphere);
+			world.add(marker);
+			spheres.push(sphere);
+			markers.push(marker);
+		}
+
+		// connect spheres with lines
+		for (let i = 0; i < spheres.length; i++) {
+			for (let j = i + 1; j < spheres.length; j++) {
+				let start = spheres[i].position;
+				let end = spheres[j].position;
+
+				let material = new t.LineBasicMaterial({
+					linewidth: 5,
+					vertexColors: t.VertexColors,
+				});
+
+				let geometry = new t.Geometry();
+				geometry.vertices.push(start, end);
+
+				let colorStart = spheres[i].material.color.clone();
+				let colorEnd = spheres[j].material.color.clone();
+				let colors = [colorStart, colorEnd];
+
+				geometry.colors = colors;
+
+				let line = new t.Line(geometry, material);
+				world.add(line);
+				lines.push(line);
+			}
+		}
 	}
 
 	function updateNumberOfCubes ()
 	{
 		let wins = windowManager.getWindows();
 
-		// remove all cubes
-		cubes.forEach((c) => {
+		// remove all spheres
+		spheres.forEach((c) => {
 			world.remove(c);
 		})
 
-		cubes = [];
+		spheres = [];
 
-		// add new cubes based on the current window setup
+		// add new spheres based on the current window setup
 		for (let i = 0; i < wins.length; i++)
 		{
 			let win = wins[i];
@@ -133,7 +203,7 @@ else
 			cube.position.y = win.shape.y + (win.shape.h * .5);
 
 			world.add(cube);
-			cubes.push(cube);
+			spheres.push(cube);
 		}
 	}
 
@@ -164,10 +234,10 @@ else
 		let wins = windowManager.getWindows();
 
 
-		// loop through all our cubes and update their positions based on current window positions
-		for (let i = 0; i < cubes.length; i++)
+		// loop through all our spheres and update their positions based on current window positions
+		for (let i = 0; i < spheres.length; i++)
 		{
-			let cube = cubes[i];
+			let cube = spheres[i];
 			let win = wins[i];
 			let _t = t;// + i * .2;
 
@@ -177,7 +247,24 @@ else
 			cube.position.y = cube.position.y + (posTarget.y - cube.position.y) * falloff;
 			cube.rotation.x = _t * .5;
 			cube.rotation.y = _t * .3;
-		};
+
+			let marker = markers[i];
+			marker.position.copy(cube.position);
+
+			if (i < lines.length) {
+				let line = lines[i];
+				let nextSphere = cube[i + 1];
+
+				if (nextSphere) {
+					let start = cube.position.clone();
+					let end = nextSphere.position.clone();
+
+					line.geometry.vertices[0] = start;
+					line.geometry.vertices[1] = end;
+					line.geometry.verticesNeedUpdate = true;
+				}
+			}
+		}
 
 		renderer.render(scene, camera);
 		requestAnimationFrame(render);
@@ -189,7 +276,7 @@ else
 	{
 		let width = window.innerWidth;
 		let height = window.innerHeight
-		
+
 		camera = new t.OrthographicCamera(0, width, 0, height, -10000, 10000);
 		camera.updateProjectionMatrix();
 		renderer.setSize( width, height );
